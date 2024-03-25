@@ -1,7 +1,14 @@
 name: Build and deploy Aseprite - Windows
 
-on:
-  workflow_dispatch
+
+on: workflow_dispatch
+#  workflow_dispatch:
+#  schedule:
+#    - cron: '0 0 * * *'
+#  push:
+#    branches:
+#      - master
+#      - fix
 
 env:
   BUILD_TYPE: Release
@@ -25,19 +32,21 @@ jobs:
         VERSION_INFO=$(echo "${data}" | jq -r '.body')
         
         echo "${LATEST_TAG}" > ${LATEST_TAG}.txt
-        echo "::set-output name=latest_tag::${LATEST_TAG}"
-        echo "::set-output name=download_url::${DOWNLOAD_URL}"
-        echo "::set-output name=version_info::${VERSION_INFO}"
+        echo "latest_tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+        echo "download_url=${DOWNLOAD_URL}" >> $GITHUB_OUTPUT
+        echo "version_info<<EOF" >> $GITHUB_OUTPUT
+        echo "$VERSION_INFO" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
     - name: Load version from cache
       id: version_check
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: ${{ steps.version_info.outputs.latest_tag }}.txt
         key: cached_version
     - name: Should we start new build?
       id: should_build
-      if: steps.version_check.outputs.cache-hit != 'true'
-      run: echo "::set-output name=should_build::true"
+      if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/fix' || steps.version_check.outputs.cache-hit != 'true'
+      run: echo "should_build=true" >> $GITHUB_OUTPUT
     - name: Create Release
       id: create_release
       if: steps.should_build.outputs.should_build
@@ -64,17 +73,17 @@ jobs:
     steps:
       - name: (Windows) Install dependencies
         if: matrix.os == 'windows-latest'
-        uses: seanmiddleditch/gha-setup-ninja@master
+        uses: seanmiddleditch/gha-setup-ninja@v3
       - name: Get Skia from cache
         id: skia-cache
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: skia
           key: skia-${{ matrix.os }}-cache
       - name: Download Skia if not in cache
         if: steps.skia-cache.outputs.cache-hit != 'true'
         run: |
-          curl -o Skia-${{ runner.os }}-Release-X64.zip -L https://github.com/aseprite/skia/releases/download/m81-b607b32047/Skia-${{ runner.os }}-Release-X64.zip
+          curl -o Skia-${{ runner.os }}-Release-X64.zip -L https://github.com/aseprite/skia/releases/download/m102-861e4743af/Skia-${{ runner.os }}-Release-x64.zip
           unzip Skia-${{ runner.os }}-Release-X64.zip -d skia
       - name: Download Aseprite release
         run: |
@@ -87,7 +96,7 @@ jobs:
         run: call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
       - name: (Windows) Setting Visual Studio build environment variables and paths
         if: matrix.os == 'windows-latest'
-        uses: compnerd/gha-setup-vsdevenv@main
+        uses: seanmiddleditch/gha-setup-vsdevenv@v4
       - name: (Windows) Run CMake
         if: matrix.os == 'windows-latest'
         working-directory: aseprite/build
