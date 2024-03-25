@@ -1,0 +1,127 @@
+name: Build and deploy Aseprite - Ubuntu
+
+on: workflow_dispatch
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  check-version:
+    name: Check latest Aseprite release
+    runs-on: ubuntu-latest
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    outputs:
+      download_url: ${{ steps.version_info.outputs.download_url }}
+      latest_tag: ${{ steps.version_info.outputs.latest_tag }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+    - name: Get latest version info
+      id: version_info
+      run: |
+        data=$(curl -sL https://api.github.com/repos/aseprite/aseprite/releases/latest)
+        LATEST_TAG=$(echo "${data}" | jq -r '.tag_name')
+        DOWNLOAD_URL=$(echo "${data}" | jq -r '.assets[].browser_download_url')
+        VERSION_INFO=$(echo "${data}" | jq -r '.body')
+
+        echo "${LATEST_TAG}" > ${LATEST_TAG}.txt
+
+        echo "latest_tag<<EOF" >> $GITHUB_OUTPUT
+        echo "${LATEST_TAG}" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "download_url<<EOF" >> $GITHUB_OUTPUT
+        echo "${DOWNLOAD_URL}" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        echo "version_info<<EOF" >> $GITHUB_OUTPUT
+        echo "${VERSION_INFO}" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    - name: Load version from cache
+      id: version_check
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.version_info.outputs.latest_tag }}.txt
+        key: cached_version
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version_info.outputs.latest_tag }}
+        name: Release Aseprite ${{ steps.version_info.outputs.latest_tag }}
+        body: |
+          ${{ steps.version_info.outputs.version_info }}
+        draft: true
+        prerelease: false
+
+  build-aseprite:
+    name: Build Aseprite
+    needs: check-version
+    runs-on: ubuntu-latest
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+      CC: "clang"
+      CXX: "clang++"
+      DESTDIR: ${{ github.workspace }}/AppDir/
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake ninja-build libxcursor-dev libxi-dev libgl1-mesa-dev clang libfuse2
+
+      - name: Get Skia from cache
+        id: skia-cache
+        uses: actions/cache@v4
+        with:
+          path: skia
+          key: skia-ubuntu-cache
+
+      - name: Download Skia if not in cache
+        if: steps.skia-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -o Skia-Linux-Release-x64-libc++.zip -L https://github.com/aseprite/skia/releases/download/m102-861e4743af/Skia-Linux-Release-x64-libc++.zip
+          unzip Skia-Linux-Release-x64-libc++.zip -d skia
+
+      - name: Download Aseprite release
+        run: |
+          curl -o Aseprite-source.zip -L ${{ needs.check-version.outputs.download_url }}
+          unzip Aseprite-source.zip -d aseprite
+          mkdir -p aseprite/build
+
+      - name: Download Linux Deploy
+        run: |
+          curl -o linuxdeploy-x86_64.AppImage -L https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20240109-1/linuxdeploy-x86_64.AppImage
+          sudo chmod +x linuxdeploy-x86_64.AppImage
+
+      - name: Download Extras
+        run: |
+          mkdir AppDir
+          curl -o AppDir/aseprite.png -L https://raw.githubusercontent.com/ilobilo/aseprite_builder/master/aseprite.png
+          curl -o AppDir/aseprite.desktop -L https://raw.githubusercontent.com/ilobilo/aseprite_builder/master/aseprite.desktop
+      - name: Run CMake
+        working-directory: aseprite/build
+        run: cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DLAF_BACKEND=skia -DSKIA_DIR=../../skia -DSKIA_LIBRARY_DIR=../../skia/out/Release-x64 -DCMAKE_CXX_FLAGS=-stdlib=libc++ -DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++ -G Ninja ..
+
+      - name: Run Ninja
+        working-directory: aseprite/build
+        run: |
+          ninja aseprite
+          ninja install
+
+      - name: Create AppImage
+        run: ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage -d AppDir/aseprite.desktop -i AppDir/aseprite.png
+
+      - name: Create release
+        run: cp Aseprite-x86_64.AppImage Aseprite-${{ needs.check-version.outputs.latest_tag }}-x86_64.AppImage
+
+      - name: Upload release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.check-version.outputs.upload_url }}
+          asset_path: Aseprite-${{ needs.check-version.outputs.latest_tag }}-x86_64.AppImage
+          asset_name: Aseprite-${{ needs.check-version.outputs.latest_tag }}-x86_64.AppImage
+          asset_content_type: application/x-executable
