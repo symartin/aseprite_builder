@@ -4,7 +4,7 @@
 [![GitHub license](https://img.shields.io/github/license/symartin/aseprite_builder.svg)](https://raw.githubusercontent.com/symartin/aseprite_builder/main/LICENSE)
 
 ## What is it
-Automated workflow for GitHub Actions which builds Aseprite for Windows forked from [ellisonoswalt/aseprite_builder](https://github.com/ellisonoswalt/aseprite_builder) repository.
+Automated workflow for GitHub Actions which builds Aseprite for Windows forked from [ellisonoswalt/aseprite_builder](https://github.com/ellisonoswalt/aseprite_builder) repository with some cherypicking from [sallandcall/aseprite_builder](https://github.com/sallandcall/aseprite_builder) updated script.
 
 By using GitHub actions there is no need for manual compilation and it does not contain malware. To adhere to the EULA of Aseprite, this workflow does not upload the binary in a public accessible space like artifacts. The release can be found within the releases as a draft (only visible for repo owner).
 
